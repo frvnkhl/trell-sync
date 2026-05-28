@@ -43,7 +43,7 @@ Goal: everything compiles, env is typed, Supabase + Zustand are wired in.
 
 Goal: Supabase Postgres schema that replaces Google Sheets as the source of truth.
 
-- [ ] **2.1** Create `orders` table migration:
+- [x] **2.1** Create `orders` table migration:
   ```sql
   id          text primary key,          -- e.g. "260524-001"
   name        text not null,
@@ -61,10 +61,10 @@ Goal: Supabase Postgres schema that replaces Google Sheets as the source of trut
   source      text,                      -- '' | 'email' | 'import'
   created_at  timestamptz default now()
   ```
-- [ ] **2.2** Create `order_id_seq` Postgres function — atomic next-ID generator (replaces Sheets `nextid` action, prevents duplicates across multiple tabs/PCs)
-- [ ] **2.3** Generate TypeScript types from Supabase schema (`supabase gen types typescript`)
-- [ ] **2.4** Write RLS policies — authenticated users can read/insert/update; no deletes from client
-- [ ] **2.5** Create `sms_log` table for dedup (order_id, sent_at, manual) — replaces the Sheets-based `smsSent` flag with proper server-side atomicity
+- [x] **2.2** Create `order_id_seq` Postgres function — atomic next-ID generator (replaces Sheets `nextid` action, prevents duplicates across multiple tabs/PCs)
+- [x] **2.3** Generate TypeScript types from Supabase schema (`supabase gen types typescript`)
+- [x] **2.4** Write RLS policies — authenticated users can read/insert/update; no deletes from client
+- [x] **2.5** Create `sms_log` table for dedup (order_id, sent_at, manual) — replaces the Sheets-based `smsSent` flag with proper server-side atomicity
 
 ---
 
