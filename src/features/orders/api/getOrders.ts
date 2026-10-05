@@ -1,52 +1,55 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { Filter } from "mongodb";
 import { z } from "zod";
-import { getSupabaseAdminClient } from "#/lib/supabase.server";
-import type { Order } from "#/types/db";
+import { ordersCollection, toOrder } from "#/lib/mongo.server";
+import { requireUser } from "#/lib/session.server";
+import type { Order, OrderDoc } from "#/types/db";
 
 const schema = z.object({
-  status: z
-    .enum(["all", "prijata", "vyroba", "hotovo", "vyzdvihnuta"])
-    .default("all"),
-  search: z.string().default(""),
-  page: z.number().int().positive().default(1),
-  limit: z.number().int().positive().max(100).default(20),
+	status: z
+		.enum(["all", "prijata", "vyroba", "hotovo", "vyzdvihnuta"])
+		.default("all"),
+	search: z.string().default(""),
+	page: z.number().int().positive().default(1),
+	limit: z.number().int().positive().max(100).default(20),
 });
 
 export type GetOrdersInput = z.infer<typeof schema>;
 
 export type GetOrdersResult = {
-  data: Order[];
-  total: number;
+	data: Order[];
+	total: number;
 };
 
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export const getOrders = createServerFn({ method: "GET" })
-  .inputValidator((raw: unknown) => schema.parse(raw))
-  .handler(async ({ data }): Promise<GetOrdersResult> => {
-    const supabase = getSupabaseAdminClient();
-    const { status, search, page, limit } = data;
+	.inputValidator((raw: unknown) => schema.parse(raw))
+	.handler(async ({ data }): Promise<GetOrdersResult> => {
+		await requireUser();
+		const { status, search, page, limit } = data;
 
-    let query = supabase
-      .from("orders")
-      .select("*", { count: "exact" })
-      .order("created_at", { ascending: false });
+		const filter: Filter<OrderDoc> = {};
 
-    if (status !== "all") {
-      query = query.eq("status", status);
-    }
+		if (status !== "all") {
+			filter.status = status;
+		}
 
-    if (search.trim()) {
-      const s = search.trim();
-      query = query.or(
-        `name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%,id.ilike.%${s}%`,
-      );
-    }
+		if (search.trim()) {
+			const re = new RegExp(escapeRegex(search.trim()), "i");
+			filter.$or = [{ name: re }, { phone: re }, { email: re }, { _id: re }];
+		}
 
-    const from = (page - 1) * limit;
-    query = query.range(from, from + limit - 1);
+		const orders = ordersCollection();
+		const [rows, total] = await Promise.all([
+			orders
+				.find(filter)
+				.sort({ created_at: -1 })
+				.skip((page - 1) * limit)
+				.limit(limit)
+				.toArray(),
+			orders.countDocuments(filter),
+		]);
 
-    const { data: rows, error, count } = await query;
-
-    if (error) throw new Error(error.message);
-
-    return { data: rows ?? [], total: count ?? 0 };
-  });
+		return { data: rows.map(toOrder), total };
+	});

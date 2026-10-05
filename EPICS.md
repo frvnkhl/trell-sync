@@ -1,7 +1,7 @@
 # trell-sync — Epics & Tasks
 
 > Rebuilding MinuteCopy Správa zákaziek from a single-file vanilla JS app  
-> into a scalable TanStack Start + Supabase + Auth + Zustand stack.
+> into a scalable, low-cost TanStack Start + MongoDB Atlas (M0) + Better Auth + Zustand stack.
 
 ---
 
@@ -15,7 +15,8 @@
 | Forms | TanStack Form + Zod |
 | Tables | TanStack Table |
 | Client state / UI | **Zustand** ← still to install |
-| Backend / DB | **Supabase** (Postgres + Auth + Realtime) |
+| Database | **MongoDB Atlas M0** (free tier) |
+| Auth | **Better Auth** (email/password + admin plugin, stored in MongoDB) |
 | SMS / Trello proxy | TanStack Start server functions |
 | Styling | Tailwind CSS v4 + Radix UI |
 | Lint / format | Biome |
@@ -24,61 +25,68 @@
 
 ## Epic 1 — Foundation & Setup
 
-Goal: everything compiles, env is typed, Supabase + Zustand are wired in.
+Goal: everything compiles, env is typed, MongoDB + Better Auth + Zustand are wired in.
 
 - [x] **1.1** Install Zustand — `pnpm add zustand`
-- [x] **1.2** Install Supabase JS client — `pnpm add @supabase/supabase-js`
-- [x] **1.3** Extend `src/env.ts` — all Supabase vars go under `server:` (no `VITE_` prefix):
-  - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- [x] **1.2** Install the MongoDB driver and Better Auth — `pnpm add mongodb better-auth`
+- [x] **1.3** Extend `src/env.ts` — all vars go under `server:` (no `VITE_` prefix):
+  - `MONGODB_URI`, `MONGODB_DB`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
   - `TRELLO_KEY`, `TRELLO_TOKEN`, `SMS_API_KEY`
-  - ⚠️ Do **not** use `VITE_` for Supabase keys — `VITE_` vars are bundled into the client JS and readable in DevTools. All DB access goes through TanStack Start server functions, so the browser never needs these keys directly. The anon key is technically safe to expose (RLS enforces access), but there's no reason to in an SSR app. The service role key must never leave the server.
-- [x] **1.4** Create `src/lib/supabase.server.ts` — server-only Supabase client using `SUPABASE_URL` + `SUPABASE_ANON_KEY` (or service role key for admin ops); import only inside `createServerFn()` calls
-- [x] **1.5** *(Skip a separate browser client)* — no direct Supabase calls from the browser. Auth session is managed via cookies set by the server; Realtime subscriptions are the one exception (see Epic 9).
-- [ ] **1.6** Add `.env.local` template (`.env.example`) documenting all required vars
+  - ⚠️ Do **not** use `VITE_` for any of these — `VITE_` vars are bundled into the client JS and readable in DevTools. All DB access goes through TanStack Start server functions. The MongoDB URI contains credentials and must never leave the server.
+- [x] **1.4** Create `src/lib/mongo.server.ts` — server-only cached `MongoClient`, typed collection getters, index setup, and the atomic order-ID generator; import only inside `createServerFn()` calls
+- [x] **1.5** *(No browser DB client)* — the browser never talks to MongoDB or Better Auth directly. Session is a server-set HttpOnly cookie; live updates use TanStack Query refetching (see Epic 4.8).
+- [x] **1.6** Add `.env.example` documenting all required vars
 - [ ] **1.7** Verify dev server boots cleanly (`pnpm dev`)
 
 ---
 
 ## Epic 2 — Database Schema
 
-Goal: Supabase Postgres schema that replaces Google Sheets as the source of truth.
+Goal: MongoDB Atlas collections that replace Google Sheets as the source of truth.
 
-- [x] **2.1** Create `orders` table migration:
-  ```sql
-  id          text primary key,          -- e.g. "260524-001"
-  name        text not null,
-  phone       text,
-  email       text,
-  type        text not null,             -- velkformat | plocha | textil | darcek | gravir | peciatky | tabulky
-  zone        text not null,             -- A–G
-  shelf       text,                      -- e.g. "A-01"
-  status      text not null default 'prijata',   -- prijata | vyroba | hotovo | vyzdvihnuta
-  payment     text,                      -- zaplatene | zaloha | treba-zaplatit
-  payment_amount numeric,
-  note        text,
-  trello_id   text,
-  sms_sent    boolean default false,
-  source      text,                      -- '' | 'email' | 'import'
-  created_at  timestamptz default now()
+- [x] **2.1** `orders` collection — document shape (`OrderDoc` in `src/types/db.ts`):
   ```
-- [x] **2.2** Create `order_id_seq` Postgres function — atomic next-ID generator (replaces Sheets `nextid` action, prevents duplicates across multiple tabs/PCs)
-- [x] **2.3** Generate TypeScript types from Supabase schema (`supabase gen types typescript`)
-- [x] **2.4** Write RLS policies — authenticated users can read/insert/update; no deletes from client
-- [x] **2.5** Create `sms_log` table for dedup (order_id, sent_at, manual) — replaces the Sheets-based `smsSent` flag with proper server-side atomicity
+  _id            string       // order ID, e.g. "260524-001"
+  name           string
+  phone          string | null
+  email          string | null
+  type           string       // velkformat | plocha | textil | darcek | gravir | peciatky | tabulky
+  zone           string       // A–G
+  shelf          string | null   // e.g. "A-01"
+  status         string       // prijata | vyroba | hotovo | vyzdvihnuta
+  payment        string | null   // zaplatene | zaloha | treba-zaplatit
+  payment_amount number | null
+  note           string | null
+  trello_id      string | null
+  sms_sent       boolean
+  source         string | null   // '' | 'email' | 'import'
+  created_at     Date
+  ```
+  Indexes: unique partial on `trello_id` (only when set), `created_at` desc, `status`.
+- [x] **2.2** `nextOrderId()` — atomic next-ID generator (`findOneAndUpdate` + `$inc` upsert on `order_id_counters`; replaces Sheets `nextid`, prevents duplicates across multiple tabs/PCs)
+- [x] **2.3** Hand-written TypeScript types (`Order` for the API, `OrderDoc` for storage) — no codegen needed
+- [x] **2.4** Access control — MongoDB has no RLS, so every server function calls `requireUser()` / `requireAdmin()`; the Atlas user used in `MONGODB_URI` is the only DB credential and stays server-side. No delete endpoint for orders.
+- [ ] **2.5** `sms_log` collection for dedup (`order_id`, `sent_at`, `manual`) — collection + index are defined; used by Epic 7
+- [ ] **2.6** Atlas setup: create M0 cluster, DB user, and IP allow-list entry for the host (Vercel needs `0.0.0.0/0` on M0 — rely on a strong DB password)
 
 ---
 
 ## Epic 3 — Authentication
 
-Goal: login wall in front of the whole app. This is an internal tool so simple email+password is fine.
+Goal: login wall in front of the whole app, with admin-managed accounts. Invite-only: no public sign-up.
 
-- [ ] **3.1** Enable Supabase Auth (email/password provider, disable email confirmation for internal use)
-- [ ] **3.2** Create server functions for auth — `signIn(email, password)` and `signOut()` as `createServerFn()` calls; they call Supabase server-side and set a secure `HttpOnly` session cookie — the browser never touches the Supabase key
-- [ ] **3.3** Create `/login` route — TanStack Form posting to the `signIn` server function; on success the server sets the cookie and redirects to `/`
-- [ ] **3.4** Add auth route guard — TanStack Router `beforeLoad` on the root route reads the session cookie server-side and redirects to `/login` if missing or expired
-- [ ] **3.5** Create Zustand `useAuthStore` — holds only the safe user metadata (id, email) hydrated from the server loader; no keys or tokens stored client-side
-- [ ] **3.6** Add logout button in header → calls `signOut` server function → clears cookie → redirect to `/login`
-- [ ] **3.7** Handle session expiry — server function checks token validity on every request; expired sessions redirect to login
+- [x] **3.1** Configure Better Auth (`src/lib/auth.server.ts`) — MongoDB adapter, email/password, `disableSignUp`, `admin` plugin, `tanstackStartCookies` plugin
+- [x] **3.2** Server functions `signIn`, `signOut`, `getSession` wrapping `auth.api.*`; the browser never calls Better Auth directly
+- [x] **3.3** `/login` route — TanStack Form posting to `signIn`
+- [x] **3.4** Auth route guard — root `beforeLoad` calls `getSession` and redirects to `/login` if there is no valid session
+- [x] **3.5** Zustand `useAuthStore` — holds only safe user metadata (id, email, name, role); no tokens client-side
+- [x] **3.6** Sign-out button in the sidebar → `signOut` → redirect to `/login`
+- [ ] **3.7** Session expiry — Better Auth handles expiry/refresh; verify the redirect to `/login` end-to-end against a live Atlas cluster
+- [x] **3.8** `pnpm admin:create` script — bootstraps the first admin (no UI can exist before one admin does)
+- [x] **3.9** Roles — `admin` / `user`; `requireUser()` / `requireAdmin()` helpers guard every server function
+- [x] **3.10** `/users` (admin only) — list users, create a login (name, email, initial password, role), reset a user's password
+- [x] **3.11** `/account` — any signed-in user can change their own password (current password required; other sessions are revoked)
+- [ ] **3.12** Nice-to-have: force a password change on first login; disable/delete users; email-based password reset (needs an email provider, so deferred to keep costs at zero)
 
 ---
 
@@ -86,14 +94,14 @@ Goal: login wall in front of the whole app. This is an internal tool so simple e
 
 Goal: the main screen — stats, search, filter, sortable table.
 
-- [ ] **4.1** Create `useOrders` TanStack Query hook — fetches from Supabase, sorted newest-first
+- [x] **4.1** Create `useOrders` TanStack Query hook — fetches from MongoDB via `getOrders`, sorted newest-first
 - [ ] **4.2** Stats grid component — 4 cards: Prijaté / Vo výrobe / Čakajú na vyzdvihnutie / Vyzdvihnuté
 - [ ] **4.3** TanStack Table setup for orders — columns: ID, Customer, Type/Zone, Shelf, Created, Status, Actions
 - [ ] **4.4** Search input — filter by name, phone, email, order ID (client-side via `@tanstack/match-sorter-utils`)
 - [ ] **4.5** Status filter tabs (Všetky / Prijaté / Vo výrobe / Hotové / Vyzdvihnuté)
 - [ ] **4.6** Status + payment badges
 - [ ] **4.7** Trello-linked indicator (🔗 icon if `trello_id` is set)
-- [ ] **4.8** Supabase Realtime subscription — the one place where a thin browser-side Supabase client is justified (Realtime uses a WebSocket, not a REST call). Create a minimal client using only `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` scoped **only** to this Realtime hook; it listens for `INSERT/UPDATE` on `orders` and calls `queryClient.invalidateQueries()` so all open tabs stay in sync. RLS still protects the data — the anon key alone can't bypass it.
+- [ ] **4.8** Keep open tabs in sync — MongoDB has no browser-facing realtime channel, and we don't expose the DB to the client. Use TanStack Query `refetchInterval` (e.g. 15–30s) + `refetchOnWindowFocus` on `orders` / `order-stats`. (If true push is ever needed: a server-sent-events route backed by a MongoDB change stream — Atlas M0 supports change streams — but polling is cheaper and simpler on serverless.)
 
 ---
 
@@ -109,7 +117,7 @@ Goal: create, view, edit, and mark orders — the core workflow.
   - Notes textarea
   - Payment selector (Zaplatené / Záloha + amount / Treba zaplatiť)
   - Trello card name preview + SMS preview (live)
-  - Submit → calls `order_id_seq` server function for ID, inserts to Supabase
+  - Submit → server function calls `nextOrderId()` for the ID, inserts into the `orders` collection
 - [ ] **5.2** Auto shelf assignment — `nextShelf(zone)` logic: find lowest unused shelf number in zone among non-vyzdvihnuta orders
 - [ ] **5.3** Order detail page (`/orders/$id`)
   - Full info card + zone color panel + shelf panel
@@ -131,8 +139,8 @@ Goal: bidirectional sync — create cards from orders, detect card moves, import
 - [ ] **6.1** TanStack Start server function `trelloApi(path, method, body)` — wraps Trello REST API with key+token from env, replaces `proxy.php?action=trello`
 - [ ] **6.2** Trello board init — server function that fetches all lists for the board and returns a `listId` map (cached in TanStack Query)
 - [ ] **6.3** Create Trello card on new order — called after DB insert; on success, write `trello_id` back to `orders` row
-- [ ] **6.4** Trello polling (30s interval) — server function polls "Výroba", "Hotove zakazky na predajni", "Odovzdané" lists; auto-updates order statuses in Supabase (triggers Realtime → all clients update)
-  - Consider: replace with a Trello webhook calling a Supabase Edge Function for true real-time (optional, deferred)
+- [ ] **6.4** Trello polling (30s interval) — server function polls "Výroba", "Hotove zakazky na predajni", "Odovzdané" lists; auto-updates order statuses in MongoDB (other clients pick the change up via Epic 4.8 refetching)
+  - Consider: replace with a Trello webhook hitting a TanStack Start server route for true real-time (optional, deferred)
 - [ ] **6.5** Import from Trello modal
   - Fetch cards from "Čo treba urobiť" and "ZÁKAZKY PREDAJŇA" lists
   - Filter out already-known `trello_id`s
@@ -146,7 +154,7 @@ Goal: bidirectional sync — create cards from orders, detect card moves, import
 
 Goal: safe, dedup-protected SMS when orders go to "hotovo", plus manual send.
 
-- [ ] **7.1** TanStack Start server function `sendSmsSafe(orderId, phone, message, manual)` — checks `sms_log` table atomically before sending; prevents duplicate sends across multiple PCs
+- [ ] **7.1** TanStack Start server function `sendSmsSafe(orderId, phone, message, manual)` — checks the `sms_log` collection atomically before sending (e.g. insert guarded by a unique index on `{ order_id, manual: false }`); prevents duplicate sends across multiple PCs
 - [ ] **7.2** Auto-SMS trigger — called inside the Trello poll (Epic 6.4) and on manual status change to "hotovo"
 - [ ] **7.3** Manual SMS button on order detail — 60s cooldown enforced client-side via Zustand + server-enforced via `sms_log` timestamp check
 - [ ] **7.4** SMS message template — `getSMSMessage(order)` pure function, easy to localize
@@ -186,8 +194,9 @@ Goal: the app is solid, tested, and ready for real shop use.
 - [ ] **10.4** MinuteCopy design tokens in Tailwind config — `--green: #7AC224`, `--yellow: #F5D000`, `--black: #1a1a1a`, `--cream: #F0EDE4`; DM Sans + Barlow + DM Mono fonts
 - [ ] **10.5** Responsive layout (the table needs a mobile-friendly card view for small screens)
 - [ ] **10.6** Vitest unit tests — `nextShelf()`, `getSMSMessage()`, order ID format, status badge logic
-- [ ] **10.7** Data migration script — one-time import of existing Google Sheets data into Supabase
-- [ ] **10.8** Deployment config (Vercel / Netlify / Fly.io) with env vars
+- [ ] **10.7** Data migration script — one-time import of existing Google Sheets data into MongoDB
+- [ ] **10.8** Deployment config (Vercel / Netlify / Fly.io) with env vars (`MONGODB_URI`, `MONGODB_DB`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` = the deployed origin, Trello + SMS keys)
+- [ ] **10.9** Atlas M0 housekeeping — M0 has no automated backups; schedule a periodic `mongodump`/export of `orders` and `user`/`account` collections
 
 ---
 
@@ -211,13 +220,13 @@ Epics 8 and 9 are largely independent after Epic 5.
 
 ## What the old app does that maps 1:1
 
-| Old (proxy.php / localStorage) | New (Supabase) |
+| Old (proxy.php / localStorage) | New (MongoDB Atlas) |
 |---|---|
-| `action=nextid` (Sheets counter) | `order_id_seq` Postgres function |
-| `action=get` (read all orders) | `supabase.from('orders').select()` |
-| `action=add` | `supabase.from('orders').insert()` |
-| `action=update` | `supabase.from('orders').update()` |
-| `action=sms_safe` (dedup check) | Server function + `sms_log` table |
+| `action=nextid` (Sheets counter) | `nextOrderId()` (atomic `$inc` on `order_id_counters`) |
+| `action=get` (read all orders) | `ordersCollection().find()` |
+| `action=add` | `ordersCollection().insertOne()` |
+| `action=update` | `ordersCollection().updateOne()` |
+| `action=sms_safe` (dedup check) | Server function + `sms_log` collection |
 | `action=trello` (proxy) | TanStack Start server function |
-| 30s `setInterval` polling + localStorage | Supabase Realtime → all tabs sync instantly |
+| 30s `setInterval` polling + localStorage | TanStack Query `refetchInterval` → all tabs stay in sync |
 | `localStorage('zakazky')` fallback | TanStack Query offline cache |

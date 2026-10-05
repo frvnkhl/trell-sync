@@ -1,11 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
-import { deleteCookie } from "@tanstack/react-start/server";
-import { getSupabaseServerClient } from "#/lib/supabase.server";
+import { getRequestHeaders } from "@tanstack/react-start/server";
+import { auth } from "#/lib/auth.server";
 
 export const signOut = createServerFn({ method: "POST" }).handler(async () => {
-	const supabase = getSupabaseServerClient();
-	await supabase.auth.signOut();
-
-	deleteCookie("sb-access-token", { path: "/" });
-	deleteCookie("sb-refresh-token", { path: "/" });
+	await auth.api.signOut({ headers: getRequestHeaders() });
 });

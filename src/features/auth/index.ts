@@ -4,4 +4,5 @@ export { getSession } from "./api/getSession";
 export { useAuthStore } from "./model/authStore";
 export { LoginForm } from "./components/LoginForm";
 export { LogoutButton } from "./components/LogoutButton";
-export type { AuthUser, SignInInput } from "./types";
+export { ChangePasswordForm } from "./components/ChangePasswordForm";
+export type { AuthUser, SignInInput, UserRole } from "./types";

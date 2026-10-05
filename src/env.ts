@@ -3,9 +3,10 @@ import { z } from "zod";
 
 export const env = createEnv({
   server: {
-    SUPABASE_URL: z.url(),
-    SUPABASE_PUBLISHABLE_KEY: z.string(),
-    SUPABASE_SECRET_KEY: z.string(),
+    MONGODB_URI: z.string().startsWith("mongodb"),
+    MONGODB_DB: z.string().default("trell-sync"),
+    BETTER_AUTH_SECRET: z.string().min(32),
+    BETTER_AUTH_URL: z.url(),
     TRELLO_KEY: z.string(),
     TRELLO_TOKEN: z.string(),
     SMS_API_KEY: z.string(),

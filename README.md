@@ -1,13 +1,36 @@
-Welcome to your new TanStack Start app! 
+# trell-sync
+
+Order management for MinuteCopy (Správa zákaziek), synced with Trello. Built with TanStack Start, **MongoDB Atlas (M0 free tier)** and **Better Auth**. See `CLAUDE.md` for architecture and conventions, and `EPICS.md` for the roadmap.
 
 # Getting Started
 
-To run this application:
+1. Create a free [MongoDB Atlas](https://www.mongodb.com/atlas) M0 cluster, a database user, and allow your IP under Network Access.
+2. Copy the env template and fill it in:
 
-```bash
-pnpm install
-pnpm dev
-```
+   ```bash
+   cp .env.example .env
+   ```
+
+   - `MONGODB_URI` — Atlas connection string (Connect → Drivers)
+   - `MONGODB_DB` — database name (default `trell-sync`)
+   - `BETTER_AUTH_SECRET` — at least 32 chars: `openssl rand -base64 32`
+   - `BETTER_AUTH_URL` — the app's origin (`http://localhost:3000` locally)
+   - `TRELLO_KEY`, `TRELLO_TOKEN`, `SMS_API_KEY`
+
+3. Install and create the first admin (sign-up is disabled, so there is no other way in):
+
+   ```bash
+   pnpm install
+   pnpm admin:create admin@example.com 'a-strong-password' 'Admin Name'
+   pnpm dev
+   ```
+
+4. Sign in, then use **Users** in the sidebar to create logins for other people. They can change their own password under **Account**.
+
+## Users & roles
+
+- `admin` — can open **Users**: create logins (name, email, initial password, role) and reset passwords.
+- `user` — can use orders/import and change their own password.
 
 # Building For Production
 
@@ -62,7 +85,7 @@ pnpm dlx shadcn@latest add button
 ## T3Env
 
 - You can use T3Env to add type safety to your environment variables.
-- Add Environment variables to the `src/env.mjs` file.
+- Add Environment variables to the `src/env.ts` file.
 - Use the environment variables in your code.
 
 ### Usage

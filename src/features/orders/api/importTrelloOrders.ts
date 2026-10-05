@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { getSupabaseAdminClient } from "#/lib/supabase.server";
+import {
+	ensureIndexes,
+	nextOrderId,
+	ordersCollection,
+} from "#/lib/mongo.server";
+import { requireUser } from "#/lib/session.server";
 
 const CardSchema = z.object({
 	trelloId: z.string(),
@@ -40,55 +45,47 @@ export type ImportResult = {
 export const importTrelloOrders = createServerFn({ method: "POST" })
 	.inputValidator((raw: unknown) => schema.parse(raw))
 	.handler(async ({ data: cards }): Promise<ImportResult> => {
-		const supabase = getSupabaseAdminClient();
+		await requireUser();
+		await ensureIndexes();
+
+		const orders = ordersCollection();
 		const result: ImportResult = { imported: 0, skipped: 0, errorDetails: [] };
 
 		for (const card of cards) {
-			const { data: existing } = await supabase
-				.from("orders")
-				.select("id")
-				.eq("trello_id", card.trelloId)
-				.maybeSingle();
-
-			if (existing) {
+			if (
+				await orders.findOne(
+					{ trello_id: card.trelloId },
+					{ projection: { _id: 1 } },
+				)
+			) {
 				result.skipped++;
 				continue;
 			}
 
-			let orderId = card.orderId;
-			if (!orderId) {
-				const { data: generatedId, error: rpcError } =
-					await supabase.rpc("order_id_seq");
-				if (rpcError || !generatedId) {
-					result.errorDetails.push({
-						name: card.name,
-						reason: rpcError?.message ?? "Nepodarilo sa vygenerovať ID zákazky",
-					});
-					continue;
-				}
-				orderId = generatedId;
-			}
-
-			const { error } = await supabase.from("orders").insert({
-				id: orderId,
-				name: card.name,
-				phone: card.phone || null,
-				email: card.email || null,
-				type: card.type,
-				zone: card.zone,
-				shelf: card.shelf || null,
-				status: card.status,
-				note: card.note || null,
-				trello_id: card.trelloId,
-				source: "import",
-				sms_sent: false,
-				created_at: card.createdAt,
-			});
-
-			if (error) {
-				result.errorDetails.push({ name: card.name, reason: error.message });
-			} else {
+			try {
+				await orders.insertOne({
+					_id: card.orderId ?? (await nextOrderId()),
+					name: card.name,
+					phone: card.phone || null,
+					email: card.email || null,
+					type: card.type,
+					zone: card.zone,
+					shelf: card.shelf || null,
+					status: card.status,
+					payment: null,
+					payment_amount: null,
+					note: card.note || null,
+					trello_id: card.trelloId,
+					source: "import",
+					sms_sent: false,
+					created_at: new Date(card.createdAt),
+				});
 				result.imported++;
+			} catch (e) {
+				result.errorDetails.push({
+					name: card.name,
+					reason: e instanceof Error ? e.message : "Neznáma chyba",
+				});
 			}
 		}
 

@@ -13,17 +13,13 @@
     "format": "biome format",
     "lint": "biome lint",
     "check": "biome check",
-    "db:push": "supabase db push",
-    "db:types": "supabase gen types typescript --project-id bwsvytrsbkvxpholslqv > src/types/supabase.ts",
-    "db:new": "supabase migration new",
-    "db:diff": "supabase db diff --linked"
+    "admin:create": "tsx --env-file=.env scripts/createAdmin.ts"
   },
   "dependencies": {
     "@faker-js/faker": "^10.3.0",
-    "@supabase/supabase-js": "^2.106.2",
     "@t3-oss/env-core": "^0.13.10",
     "@tailwindcss/vite": "^4.1.18",
-    "@tanstack/match-sorter-utils": "latest",
+    "@tanstack/match-sorter-utils": "^8.19.4",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-form": "latest",
     "@tanstack/react-query": "latest",
@@ -32,11 +28,13 @@
     "@tanstack/react-router-devtools": "latest",
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
-    "@tanstack/react-table": "latest",
+    "@tanstack/react-table": "^8.21.3",
     "@tanstack/router-plugin": "^1.132.0",
+    "better-auth": "^1.7.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
+    "mongodb": "^7.7.0",
     "nitro": "3.0.260522-beta",
     "radix-ui": "^1.4.3",
     "react": "^19.2.0",
@@ -59,14 +57,9 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^28.1.0",
+    "tsx": "^4.20.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
     "vitest": "^4.1.5"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lightningcss"
-    ]
   }
 }

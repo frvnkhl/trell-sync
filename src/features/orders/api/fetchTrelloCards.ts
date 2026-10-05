@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSupabaseAdminClient } from "#/lib/supabase.server";
+import { ordersCollection } from "#/lib/mongo.server";
+import { requireUser } from "#/lib/session.server";
 import {
 	TRELLO_BOARD_ID,
 	TRELLO_LIST_STATUS,
@@ -10,18 +11,21 @@ import {
 
 export const fetchTrelloCards = createServerFn({ method: "GET" }).handler(
 	async (): Promise<TrelloCardPreview[]> => {
-		const supabase = getSupabaseAdminClient();
+		await requireUser();
 
-		const [lists, { data: existingOrders }] = await Promise.all([
+		const [lists, existingOrders] = await Promise.all([
 			trelloGet(`/boards/${TRELLO_BOARD_ID}/lists`) as Promise<
 				Array<{ id: string; name: string }>
 			>,
-			supabase.from("orders").select("trello_id").not("trello_id", "is", null),
+			ordersCollection()
+				.find(
+					{ trello_id: { $type: "string" } },
+					{ projection: { trello_id: 1 } },
+				)
+				.toArray(),
 		]);
 
-		const knownIds = new Set(
-			(existingOrders ?? []).map((o) => o.trello_id).filter(Boolean),
-		);
+		const knownIds = new Set(existingOrders.map((o) => o.trello_id));
 
 		const targetLists = lists.filter((l) => l.name in TRELLO_LIST_STATUS);
 

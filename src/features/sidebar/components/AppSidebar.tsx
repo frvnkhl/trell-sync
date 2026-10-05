@@ -16,10 +16,11 @@ import ThemeToggle from "#/components/ThemeToggle";
 
 type Props = {
   userEmail: string | undefined;
+  isAdmin: boolean;
   onLogout: () => void;
 };
 
-export const AppSidebar = ({ userEmail, onLogout }: Props) => {
+export const AppSidebar = ({ userEmail, isAdmin, onLogout }: Props) => {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -36,16 +37,18 @@ export const AppSidebar = ({ userEmail, onLogout }: Props) => {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
-            {navItems.map((item) => (
-              <SidebarMenuItem key={item.url}>
-                <SidebarMenuButton asChild tooltip={item.label}>
-                  <Link to={item.url}>
-                    <item.icon className="size-4" />
-                    <span>{item.label}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+            {navItems
+              .filter((item) => isAdmin || !item.adminOnly)
+              .map((item) => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild tooltip={item.label}>
+                    <Link to={item.url}>
+                      <item.icon className="size-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

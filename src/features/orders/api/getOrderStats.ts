@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSupabaseAdminClient } from "#/lib/supabase.server";
+import { ordersCollection } from "#/lib/mongo.server";
+import { requireUser } from "#/lib/session.server";
 
 export type OrderStats = {
 	prijata: number;
@@ -10,32 +11,22 @@ export type OrderStats = {
 
 export const getOrderStats = createServerFn({ method: "GET" }).handler(
 	async (): Promise<OrderStats> => {
-		const supabase = getSupabaseAdminClient();
+		await requireUser();
 
-		const [prijata, vyroba, hotovo, vyzdvihnuta] = await Promise.all([
-			supabase
-				.from("orders")
-				.select("*", { count: "exact", head: true })
-				.eq("status", "prijata"),
-			supabase
-				.from("orders")
-				.select("*", { count: "exact", head: true })
-				.eq("status", "vyroba"),
-			supabase
-				.from("orders")
-				.select("*", { count: "exact", head: true })
-				.eq("status", "hotovo"),
-			supabase
-				.from("orders")
-				.select("*", { count: "exact", head: true })
-				.eq("status", "vyzdvihnuta"),
-		]);
+		const groups = await ordersCollection()
+			.aggregate<{ _id: string; count: number }>([
+				{ $group: { _id: "$status", count: { $sum: 1 } } },
+			])
+			.toArray();
+
+		const countOf = (status: keyof OrderStats) =>
+			groups.find((g) => g._id === status)?.count ?? 0;
 
 		return {
-			prijata: prijata.count ?? 0,
-			vyroba: vyroba.count ?? 0,
-			hotovo: hotovo.count ?? 0,
-			vyzdvihnuta: vyzdvihnuta.count ?? 0,
+			prijata: countOf("prijata"),
+			vyroba: countOf("vyroba"),
+			hotovo: countOf("hotovo"),
+			vyzdvihnuta: countOf("vyzdvihnuta"),
 		};
 	},
 );

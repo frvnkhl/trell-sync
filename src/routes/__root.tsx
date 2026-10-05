@@ -71,7 +71,11 @@ const RootLayout = () => {
 
 	return (
 		<SidebarProvider>
-			<AppSidebar userEmail={user?.email} onLogout={handleLogout} />
+			<AppSidebar
+				userEmail={user?.email}
+				isAdmin={user?.role === "admin"}
+				onLogout={handleLogout}
+			/>
 			<SidebarInset>
 				<Outlet />
 			</SidebarInset>
